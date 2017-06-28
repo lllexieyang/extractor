@@ -48,7 +48,7 @@ def node_extract(isolate, node, gene):
 #options
 argv = sys.argv[1:]
 try:
-    opts, args = getopt.getopt(argv, "hf:b:o:")
+    opts, args = getopt.getopt(argv, "hb:f:o:")
 except getopt.GetoptError:
     print 'Error: please try node_extract3.0.py -h for help'   
     sys.exit(2)
