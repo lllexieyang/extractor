@@ -1,95 +1,137 @@
-# node-extract
-根据blast结果提取fasta文件中含指定基因的contig
+# 1. extract single contig from fasta file (-i -e)
+# 2. extract contigs from multiple fasta files according to a list provided (-l)
+# 3. run blast to find the best hit and extract contigs (-b)
+# 4. use mlplasmids output to divide genome into chromosome and plasmids (-p)
+# for batch running: use "-l" or run it in a loop
+# Priority: -l > -i -e > -i -p/b
+# Copy right: Lu Yang (yanglu2016@cau.edu.cn)
+# Last change: Oct 10 2019
 
-#!/usr/bin/env python
 
-import re
 import os
-import sys, getopt
+from optparse import OptionParser
+import collections
+from Bio import SeqIO
+from Bio.Alphabet import generic_dna
 
 
-def Inc_result(isolate, gene):
-    file = blast_input + isolate + '.blast'
-    f = open(file, "r")
-    line = f.readline()
-    node_num = 'apple'
-    feedback = output + 'node_info.txt'
-    while line:
-        find_gene = line.find(gene)
-        if find_gene >= 0:
-            r = open(feedback, "a")
-            node_num = re.findall(r"NODE_(.+?)_", line)[0]
-            r.write(isolate + "\t" + line + "\n")
-            r.close()  
-        line = f.readline()
-    f.close()
-    return node_num
+def get_arguments():
+    usage = "usage: %prog [options]"
+    parser = OptionParser(usage=usage)
+    parser.add_option("-l", "--list", action="store", dest="list", default="",
+                      help="list of file and contig names, Column 1: file name, Column 2: contig name")
+    parser.add_option("-i", "--input", action="store", dest="input", help="input fasta file", default=[])
+    parser.add_option("-e", "--extract", action="store", dest="extract", help="extract single contig from file",
+                      default=[])
+    parser.add_option("-o", "--output", action="store", dest="output", help="output path, default is ./", default="./")
+    parser.add_option("-b", "--blast", action="store", help="database for blast to find target contigs",
+                      default="")
+    parser.add_option("-p", "--plasmid", action="store", dest="plasmid", help="provide mlplasmids result for division",
+                      default="")
+    return parser.parse_args()
 
-def node_extract(isolate, node, gene):
-    input_name = fasta_input + isolate + '.fasta' 
-    start_point = "NODE_" + node
-    stop_point = ">NODE_" + str(int(node) + 1)
-    output_name = output + isolate + '_' + gene + '_' + start_point + '.fasta'
-    i = open(input_name, "r")
-    line = i.readline()
-    while line:
-        if line.find(start_point) >= 0:
-            o = open(output_name, "a")
-            while line:
-                if line.find(stop_point) >= 0:
-                    o.close()
-                    break
-                o.write(line)
-                line = i.readline()
-        line = i.readline()
-    i.close()
+
+def extract(f, ids, out):
+    ids_found_in_fasta = []
+    o = open(out, "w")
+    print 'Open file ', f
+    print 'Extract contigs: ', ids
+    refseq_records = list(SeqIO.parse(f, "fasta", generic_dna))
+    for record in refseq_records:
+        if record.id in ids:
+            o.write(record.format("fasta"))
+            ids_found_in_fasta.append(record.id)
+    o.close()
+    save = 0
+    for i in ids:
+        if i not in ids_found_in_fasta:
+            print "id \033[1;31m%s\033[0m not found in the fasta file. Please provide the correct contig name." % i
+        else:
+            save = 1
+    if save:
+        print 'Saved in ', out
     return 0
 
-#options
-argv = sys.argv[1:]
-try:
-    opts, args = getopt.getopt(argv, "hb:f:o:")
-except getopt.GetoptError:
-    print 'Error: please try node_extract3.0.py -h for help'   
-    sys.exit(2)
 
-fasta_input = ""
-blast_input = ""
-output = ""
+def divide(f, ids, o):
+    ids_found_in_fasta = []
+    out1 = o + f[:-6] + '_plasmid.fasta'
+    out2 = o + f[:-6] + '_chromosome.fasta'
+    o1 = open(out1, "w")
+    o2 = open(out2, "w")
+    print 'Open file ', f
+    print ''
+    refseq_records = list(SeqIO.parse(f, "fasta", generic_dna))
+    for record in refseq_records:
+        if record.id in ids:
+            o1.write(record.format("fasta"))
+            ids_found_in_fasta.append(record.id)
+        else:
+            o2.write(record.format("fasta"))
+    o1.close()
+    o2.close()
+    save1 = 0
+    for i in ids:
+        if i not in ids_found_in_fasta:
+            print "id \033[1;31m%s\033[0m not found in the fasta file. Please provide the correct input file." % i
+        else:
+            save1 = 1
+    if save1:
+        print f, 'divide success.'
+        print 'Chromosome is saved in ', out2
+        print 'Plasmids is saved in ', out1
+    return 0
 
 
-for op, value in opts:
-    if op == "-f":
-        fasta_input = value
-    elif op == "-b":
-        blast_input = value
-    elif op == "-o":
-        output = value
-    elif op == "-h":
-        print '\n python node_extract3.0.py -b <blastpath> -f <fastapath> -o <outputpath>'
-        print ' for example:'
-        print ' python node_extract3.0.py -b /disk1/cau/cvmylx/blast/ -f /disk1/cau/cvmylx/contigs/ -o /disk1/cau/
-cvmylx/nodes/' 
-        print '\n'
-        sys.exit()
+def main():
+    (options, args) = get_arguments()
+    lists = collections.defaultdict(list)
+    if options.list != "":
+        f = open(options.list, "r")
+        for line in f:
+            line = line.replace("\n", "\t\n")
+            file_name = line.split("\t")[0]
+            id_list = line.split("\t")[1]
+            lists[file_name].append(id_list)
+    elif options.input:
+        if options.extract:
+            lists[options.input].append(options.extract)
+        elif options.blast:
+            db = options.blast
+            if not os.path.exists(db + '.nin'):
+                if os.path.exists(db):
+                    os.system("makeblastdb -in %s -dbtype nucl" % db)
+                else:
+                    print db, 'not exists in current path'
+            blast = options.input[:-6] + ".blast"
+            if not os.path.exists(blast):
+                os.system("blastn -query " + options.input + " -db " + db + " -outfmt '6 qseqid sacc pident qlen length sstart send' -out " + blast)
+            b = file(blast, "r")
+            for line in b:
+                if line.split("\t")[0] not in lists[options.input]:
+                    lists[options.input].append(line.split("\t")[0])
+            b.close()
+        elif options.plasmid:
+            p = file(options.plasmid)
+            header = 1
+            for line in p:
+                if header == 0:
+                    i = (line.split()[3]).replace('"', '')
+                    lists[options.input].append(i)
+                header = 0
+            for file_name in lists:
+                ids = lists[file_name]
+                divide(file_name, ids, options.output)
+            exit()
+    else:
+        print "No input sequence file provided.\n -h for help"
+    for file_name in lists:
+        ids = lists[file_name]
+        outname = options.output + file_name[:-6] + '_extract.fasta'
+        extract(file_name, ids, outname)
 
-#get file id
-path = fasta_input
-file_name = []
-files = os.listdir(path)
-for file in files:
-    parts = file.split('.')
-    id = parts[0]
-    file_name.append(id)
+    return 0
 
-#get genes
-input_genes =raw_input("please input your genes:")
-genes = input_genes.split()
 
-print file_name
-print genes
-for name in file_name:
-    for gene in genes:
-        node_num = Inc_result(name, gene)
-        if node_num != 'apple':
-            node_extract(name,node_num, gene)
+if __name__ == '__main__':
+    main()
