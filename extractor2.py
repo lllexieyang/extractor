@@ -1,15 +1,3 @@
-# 1. extract/remove single contig from one fasta file (-i example.fasta -e/-r 1)
-# 2. extract/remove contigs from multiple fasta files according to a list (-e/-r list.txt)
-#    File of list contains fasta file names and contig names to extract or remove, separated by tab(\t).
-#    Column 1: file name, Column 2: contig name
-# 3. run blast and extract contigs containing target genes. (-i example.fasta -b PlasmidFinder.fasta)
-# 4. use mlplasmids output to divide genome into chromosome and plasmids. (-i example.fasta -p example.tab)
-
-# for batch running: 1. use "-e" or "-r" with a list file, WITHOUT "-i";
-#                    2. use "-i" and run it in a loop.
-
-# The output files were separated by contigs. 1 input -> n output.
-
 # Copy right reserved : Lu Yang (yanglu2016@cau.edu.cn)
 # Last change: Nov 8 2021
 # Version 2.1
