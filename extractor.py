@@ -2,15 +2,17 @@
 # 2. extract/remove contigs from multiple fasta files according to a list (-e/-r list.txt)
 #    File of list contains fasta file names and contig names to extract or remove, separated by tab(\t).
 #    Column 1: file name, Column 2: contig name
-# 3. run blast to find the best hit and extract contigs. (-i example.fasta -b PlasmidFinder.fasta)
+# 3. run blast and extract contigs containing target genes. (-i example.fasta -b PlasmidFinder.fasta)
 # 4. use mlplasmids output to divide genome into chromosome and plasmids. (-i example.fasta -p example.tab)
 
 # for batch running: 1. use "-e" or "-r" with a list file, WITHOUT "-i";
 #                    2. use "-i" and run it in a loop.
 
-# Copy right reserved : Lu Yang (yanglu2016@cau.edu.cn)
-# Last change: Nov 24 2020
+# The output files were separated by contigs. 1 input -> n output.
 
+# Copy right reserved : Lu Yang (yanglu2016@cau.edu.cn)
+# Last change: Nov 8 2021
+# Version 2.1
 
 import os
 from optparse import OptionParser
@@ -21,10 +23,8 @@ from Bio import SeqIO
 def get_arguments():
     usage = "usage: %prog [options]"
     parser = OptionParser(usage=usage)
-    parser.add_option("-l", "--list", action="store", dest="list", default="",
-                      help="")
     parser.add_option("-i", "--input", action="store", dest="input", help="input fasta file", default=[])
-    parser.add_option("-e", "--extract", action="store", dest="extract", help="extract single contig from file",
+    parser.add_option("-e", "--extract", action="store", dest="extract", help="extract contigs from file",
                       default=[])
     parser.add_option("-r", "--remove", action="store", dest="remove", help="remove contigs from file",
                       default=[])
@@ -33,24 +33,30 @@ def get_arguments():
                       default="")
     parser.add_option("-p", "--plasmid", action="store", dest="plasmid", help="provide mlplasmids result for division",
                       default="")
+    parser.add_option("-x", "--prefix", action="store", dest="prefix", help="filename output prefix", default='extract')
+    parser.add_option("-l", "--locustag", action="store", dest="locustag", help="locustag prefix", default='')
 
     return parser.parse_args()
 
 
-def extract(f, ids, out):
+def extract(f, ids, out, locus):
+    n = 1
     ids_found_in_fasta = []
-    o = open(out, "w")
     print ('Open file ', f)
     print ('Extract contigs: ', ids)
     for record in SeqIO.parse(f, "fasta"):
         if record.id in ids:
-            o.write(record.format("fasta"))
+            out_name = out[:-6] + '_' + str(n) + '.fasta'
+            o = open(out_name, "w")
             ids_found_in_fasta.append(record.id)
+            record.id = f[:-6] + '_' + locus + '_' + str(n)
+            o.write(record.format("fasta"))
+            n += 1
     o.close()
     save = 0
     for i in ids:
         if i not in ids_found_in_fasta:
-            print("id \033[1;31m%s\033[0m not found in the fasta file. Please provide the correct contig name." % i)
+            print("id \033[1;31m%s\033[0m not found in the fasta file. Please provide the FULL contig name." % i)
         else:
             save = 1
     if save:
@@ -105,30 +111,45 @@ def divide(f, ids, o):
     return 0
 
 
+def get_blast(f,db,type):
+    if not os.path.exists(db + '.nin'):
+        if os.path.exists(db):
+            os.system("makeblastdb -in %s -dbtype nucl" % db)
+        else:
+            print(db, 'not exists in current path')
+    blast = f[:-6] + ".blast"
+    if os.path.exists(blast):
+        print('Blast results are already exist in current path, and will be used directly.')
+    else:
+        os.system("blastn -query " + f + " -db " + db +
+                  " -outfmt 6 -out " + blast)
+#                  " -outfmt '6 qseqid sacc pident qlen length sstart send' -out " + blast)
+
+    b = open(blast, "r")
+    for line in b:
+        if type == 2:
+            if line.split("\t")[0] not in lists[f]:
+                lists[f].append(line.split("\t")[0])
+        elif type == 4:
+            seqs = []
+            seqs.append(line.split("\t")[0])
+            seqs.append(line.split("\t")[6])
+            seqs.append(line.split("\t")[7])
+            lists[f].append(seqs)
+    return lists
+
+
 def main():
     (options, args) = get_arguments()
-    lists = collections.defaultdict(list)
+    locus = options.locustag
     if options.input:
         if options.extract:
             lists[options.input].append(options.extract)
         elif options.remove:
             lists[options.input].append(options.remove)
         elif options.blast:
-            db = options.blast
-            if not os.path.exists(db + '.nin'):
-                if os.path.exists(db):
-                    os.system("makeblastdb -in %s -dbtype nucl" % db)
-                else:
-                    print(db, 'not exists in current path')
-            blast = options.input[:-6] + ".blast"
-            if not os.path.exists(blast):
-                os.system("blastn -query " + options.input + " -db " + db +
-                          " -outfmt '6 qseqid sacc pident qlen length sstart send' -out " + blast)
-            b = open(blast, "r")
-            for line in b:
-                if line.split("\t")[0] not in lists[options.input]:
-                    lists[options.input].append(line.split("\t")[0])
-            b.close()
+            get_blast(options.input, options.blast, 2)
+#            print(get_blast(options.input, options.blast, 4))
         elif options.plasmid:
             p = open(options.plasmid, "r")
             header = 1
@@ -161,11 +182,15 @@ def main():
             outname = options.output + file_name[:-6] + '_clean.fasta'
             remove(file_name, ids, outname)
         else:
-            outname = options.output + file_name[:-6] + '_extract.fasta'
-            extract(file_name, ids, outname)
+            outname = options.output + file_name[:-6] + '_' + options.prefix + '.fasta'
+            extract(file_name, ids, outname, locus)
 
     return 0
 
 
+lists = collections.defaultdict(list)
+
+
 if __name__ == '__main__':
     main()
+
